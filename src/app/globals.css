@@ -1,26 +1,108 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens.
+ *
+ * Light-only by deliberate choice for V1: this is an operational tool used in
+ * daylight at airports and agency counters, and a second theme is surface area
+ * we would have to keep correct for no stated benefit.
+ *
+ * `--brand` is set per request from the agency's configured primary colour, so
+ * every agency's dashboard and website carry their own accent while the product
+ * structure stays identical (spec §76).
+ */
+
+@theme {
+  /* Neutrals — a slightly cool grey ramp */
+  --color-canvas: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #fafbfc;
+  --color-line: #e5e8ec;
+  --color-line-strong: #d3d8e0;
+
+  --color-ink: #0f172a;
+  --color-ink-soft: #4a5568;
+  --color-ink-muted: #8791a5;
+
+  /* Semantic — used for operational status, not decoration */
+  --color-positive: #047857;
+  --color-positive-soft: #ecfdf5;
+  --color-caution: #b45309;
+  --color-caution-soft: #fffbeb;
+  --color-critical: #be123c;
+  --color-critical-soft: #fff1f2;
+  --color-info: #1d4ed8;
+  --color-info-soft: #eff6ff;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-card: 0.875rem;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Overridden per agency by the dashboard and site shells */
+  --brand: #4f46e5;
+  --brand-ink: #ffffff;
+  --brand-soft: color-mix(in srgb, var(--brand) 8%, white);
+  --brand-line: color-mix(in srgb, var(--brand) 22%, white);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard focus that is visible without being loud */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 0.375rem;
+}
+
+/* Inputs should never zoom the viewport on iOS — employees work on phones */
+@media (max-width: 640px) {
+  :where(input, select, textarea) {
+    font-size: 16px;
+  }
+}
+
+/* Respect reduced-motion for the few transitions we do use */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * Printing. A rental contract has to come off a printer at the counter and out
+ * of "save as PDF" on a phone, so the page is laid out for A4 and everything
+ * that is not the document is dropped.
+ */
+@media print {
+  body {
+    background: #fff;
+  }
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+}
+
+/* Hide scrollbars on horizontal nav strips while keeping them scrollable */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

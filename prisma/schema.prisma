@@ -1,0 +1,1382 @@
+// Car Rental SaaS — database schema
+//
+// Conventions
+//   * Every business table carries `agencyId`. Tenant isolation is enforced by the
+//     tenant-scoped Prisma client (see docs/ARCHITECTURE.md §3), not by callers.
+//   * All money is `numeric(12,2)` -> Prisma `Decimal`. Never a JS float. (spec §94)
+//   * All instants are `timestamptz`. Agency timezone is for display only. (spec §93)
+//   * Tables are snake_case in the database, camelCase in TypeScript.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7: connection URLs live in prisma.config.ts (for the CLI) and are
+// passed to PrismaClient through a driver adapter (see src/server/db.ts).
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  EMPLOYEE
+}
+
+enum Locale {
+  AR
+  FR
+  EN
+}
+
+/// spec §14 — internal reservation lifecycle
+enum ReservationStatus {
+  AWAITING_CONFIRMATION
+  CONFIRMED
+  READY_FOR_PICKUP
+  ACTIVE
+  RETURN_DUE
+  OVERDUE
+  RETURN_INSPECTION
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+/// spec §18 — operational display status only; NEVER used to decide availability
+enum VehicleStatus {
+  AVAILABLE
+  RESERVED
+  RENTED
+  MAINTENANCE
+  UNAVAILABLE
+}
+
+enum Transmission {
+  MANUAL
+  AUTOMATIC
+}
+
+enum FuelType {
+  PETROL
+  DIESEL
+  HYBRID
+  ELECTRIC
+  LPG
+}
+
+/// Why a vehicle is occupied. One table, one exclusion constraint. (spec §19, §20)
+enum VehicleBlockKind {
+  RESERVATION
+  MAINTENANCE
+  MANUAL
+  PAYMENT_HOLD
+}
+
+/// spec §27
+enum BillingRule {
+  DAY_ROUND_UP
+  GRACE_PERIOD
+  EXTRA_HOURLY
+}
+
+/// spec §29
+enum OnlinePaymentMode {
+  FULL
+  PERCENTAGE
+  FIXED
+}
+
+/// spec §31 — payment methods
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  ONLINE
+  OTHER
+}
+
+/// spec §31 — reservation-level rollup, derived from transactions
+enum PaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+/// Per-transaction lifecycle (distinct from the reservation rollup above)
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+/// spec §32
+enum TransactionType {
+  RENTAL_PAYMENT
+  ONLINE_DEPOSIT
+  REFUND
+  FUEL_CHARGE
+  LATE_FEE
+  DAMAGE_CHARGE
+  MILEAGE_CHARGE
+  OTHER
+}
+
+/// spec §28
+enum DepositStatus {
+  REQUIRED
+  COLLECTED
+  HELD
+  PARTIALLY_REFUNDED
+  REFUNDED
+  RETAINED
+}
+
+/// spec §34
+enum CustomerStatus {
+  NORMAL
+  WATCHLIST
+  BLACKLISTED
+}
+
+/// spec §36
+enum DocumentType {
+  DRIVING_LICENCE
+  CIN
+  PASSPORT
+  OTHER
+}
+
+enum DocumentStatus {
+  MISSING
+  VERIFIED
+  REJECTED
+}
+
+enum InspectionType {
+  PICKUP
+  RETURN
+}
+
+enum PhotoPosition {
+  FRONT
+  REAR
+  LEFT
+  RIGHT
+  INTERIOR
+  OTHER
+}
+
+/// spec §48
+enum AdditionalChargeType {
+  LATE_RETURN
+  EXTRA_MILEAGE
+  FUEL
+  DAMAGE
+  OTHER
+}
+
+/// spec §53
+enum CancellationReason {
+  CUSTOMER_REQUEST
+  PAYMENT_ISSUE
+  AGENCY_DECISION
+  OTHER
+}
+
+/// spec §40 — configurable pickup checklist
+enum ChecklistRequirement {
+  REQUIRED
+  OPTIONAL
+  DISABLED
+}
+
+/// spec §45
+enum MileagePolicy {
+  UNLIMITED
+  LIMITED
+}
+
+/// spec §46
+enum FuelPolicy {
+  FULL_TO_FULL
+  SAME_AS_PICKUP
+  PREPAID
+}
+
+enum MaintenanceCategory {
+  OIL_CHANGE
+  TIRES
+  MECHANICAL
+  TECHNICAL_INSPECTION
+  INSURANCE
+  CLEANING
+  OTHER
+}
+
+enum ExpenseCategory {
+  OIL_CHANGE
+  TIRES
+  REPAIR
+  INSURANCE
+  TECHNICAL_INSPECTION
+  CLEANING
+  FUEL
+  OTHER
+}
+
+enum ContractStatus {
+  DRAFT
+  ISSUED
+  SIGNED
+  SUPERSEDED
+}
+
+enum FileVisibility {
+  /// Served from a public prefix — vehicle photos, agency logos, hero images
+  PUBLIC
+  /// Only ever reachable through an authorised, short-lived presigned URL (spec §85)
+  PRIVATE
+}
+
+enum ExtraPriceType {
+  FLAT
+  PER_DAY
+}
+
+enum ReservationChangeType {
+  MODIFICATION
+  EXTENSION
+  PRICE_OVERRIDE
+}
+
+enum NotificationType {
+  NEW_RESERVATION
+  AWAITING_CONFIRMATION
+  PICKUP_TODAY
+  RETURN_TODAY
+  RENTAL_OVERDUE
+  OUTSTANDING_PAYMENT
+  MAINTENANCE_DUE
+  INSURANCE_EXPIRING
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// Tenant, users, sessions
+// ---------------------------------------------------------------------------
+
+model Agency {
+  id   String @id @default(cuid())
+  /// Public website path segment: /{slug}
+  slug String @unique
+  name String
+
+  // Contact — spec §75
+  phone         String?
+  whatsapp      String?
+  email         String?
+  address       String?
+  city          String?
+  googleMapsUrl String?
+
+  // Branding — spec §76
+  logoFileId       String? @unique
+  heroFileId       String? @unique
+  primaryColor     String  @default("#0f172a")
+  secondaryColor   String  @default("#2563eb")
+  shortDescription String?
+  socialLinks      Json?
+
+  // Localisation
+  timezone        String   @default("Africa/Casablanca")
+  currency        String   @default("MAD")
+  defaultLocale   Locale   @default(FR)
+  enabledLocales  Locale[] @default([AR, FR, EN])
+
+  customDomain String? @unique
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  logoFile StoredFile? @relation("AgencyLogo", fields: [logoFileId], references: [id])
+  heroFile StoredFile? @relation("AgencyHero", fields: [heroFileId], references: [id])
+
+  settings         AgencySettings?
+  contractSettings ContractSettings?
+  workingHours     WorkingHours[]
+
+  users                 User[]
+  vehicles              Vehicle[]
+  vehicleImages         VehicleImage[]
+  vehicleBlocks         VehicleBlock[]
+  locations             Location[]
+  seasonalRates         SeasonalRate[]
+  extras                Extra[]
+  customers             Customer[]
+  customerDocuments     CustomerDocument[]
+  customerNotes         CustomerNote[]
+  reservations          Reservation[]
+  reservationStatuses   ReservationStatusHistory[]
+  reservationExtras     ReservationExtra[]
+  reservationChanges    ReservationChange[]
+  payments              Payment[]
+  securityDeposits      SecurityDeposit[]
+  additionalCharges     AdditionalCharge[]
+  inspections           Inspection[]
+  inspectionPhotos      InspectionPhoto[]
+  damageRecords         DamageRecord[]
+  damagePhotos          DamagePhoto[]
+  contracts             Contract[]
+  signatures            Signature[]
+  maintenanceRecords    MaintenanceRecord[]
+  maintenanceBlocks     MaintenanceBlock[]
+  vehicleExpenses       VehicleExpense[]
+  notifications         Notification[]
+  auditLogs             AuditLog[]
+  files                 StoredFile[]
+
+  @@map("agencies")
+}
+
+/// spec §74 — operational configuration. Contract-specific settings live in
+/// ContractSettings; branding lives on Agency.
+model AgencySettings {
+  id       String @id @default(cuid())
+  agencyId String @unique
+
+  // Booking — spec §12, §21, §22, §54
+  bufferMinutes             Int     @default(120)
+  noShowWaitingMinutes      Int     @default(120)
+  allowDifferentReturnSite  Boolean @default(true)
+  minRentalHours            Int     @default(24)
+  maxAdvanceBookingDays     Int     @default(365)
+
+  // Billing — spec §27
+  billingRule         BillingRule @default(GRACE_PERIOD)
+  gracePeriodMinutes  Int         @default(60)
+  extraHourPrice      Decimal     @default(0) @db.Decimal(12, 2)
+
+  // Security deposit — spec §28
+  securityDepositEnabled Boolean @default(true)
+
+  // Online payment — spec §29, §30
+  onlinePaymentEnabled  Boolean           @default(false)
+  onlinePaymentMode     OnlinePaymentMode @default(PERCENTAGE)
+  onlinePaymentPercent  Int               @default(30)
+  onlinePaymentFixed    Decimal           @default(0) @db.Decimal(12, 2)
+  collectDepositOnline  Boolean           @default(false)
+  paymentHoldMinutes    Int               @default(20)
+
+  // Policies — spec §45, §46, §78
+  mileagePolicy       MileagePolicy @default(UNLIMITED)
+  mileageKmPerDay     Int?
+  extraKmPrice        Decimal?      @db.Decimal(12, 2)
+  fuelPolicy          FuelPolicy    @default(FULL_TO_FULL)
+  fuelPricePerPercent Decimal?      @db.Decimal(12, 2)
+  minDriverAge        Int           @default(21)
+  minLicenceYears     Int           @default(2)
+
+  // Pickup checklist — spec §40
+  requireDocuments   ChecklistRequirement @default(REQUIRED)
+  requireMileage     ChecklistRequirement @default(REQUIRED)
+  requireFuel        ChecklistRequirement @default(REQUIRED)
+  requirePhotos      ChecklistRequirement @default(REQUIRED)
+  requireDamageCheck ChecklistRequirement @default(REQUIRED)
+  requireDeposit     ChecklistRequirement @default(REQUIRED)
+  requirePayment     ChecklistRequirement @default(REQUIRED)
+  requireContract    ChecklistRequirement @default(REQUIRED)
+  requireSignature   ChecklistRequirement @default(REQUIRED)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@map("agency_settings")
+}
+
+/// spec §51, §78 — text blocks rendered into every generated contract
+model ContractSettings {
+  id       String @id @default(cuid())
+  agencyId String @unique
+
+  legalName          String?
+  registrationNumber String?
+  taxId              String?
+
+  termsAndConditions String?
+  fuelPolicyText     String?
+  mileagePolicyText  String?
+  damagePolicyText   String?
+  cancellationText   String?
+  depositPolicyText  String?
+  footerText         String?
+
+  stampFileId  String? @unique
+  numberPrefix String  @default("CTR")
+  /// Incremented per agency to build CTR-2026-00128 (spec §50)
+  nextSequence Int     @default(1)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  agency    Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  stampFile StoredFile? @relation("ContractStamp", fields: [stampFileId], references: [id])
+
+  @@map("contract_settings")
+}
+
+/// spec §77
+model WorkingHours {
+  id        String  @id @default(cuid())
+  agencyId  String
+  /// 0 = Sunday .. 6 = Saturday
+  dayOfWeek Int
+  isClosed  Boolean @default(false)
+  /// Local wall-clock time in the agency timezone, "HH:mm"
+  opensAt   String  @default("08:00")
+  closesAt  String  @default("20:00")
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyId, dayOfWeek])
+  @@map("working_hours")
+}
+
+/// spec §6, §79 — only OWNER and EMPLOYEE exist (spec §97.14)
+model User {
+  id           String  @id @default(cuid())
+  agencyId     String
+  username     String
+  passwordHash String
+  fullName     String
+  email        String?
+  phone        String?
+  role         Role    @default(EMPLOYEE)
+  isActive     Boolean @default(true)
+
+  lastLoginAt          DateTime? @db.Timestamptz(3)
+  passwordChangedAt    DateTime  @default(now()) @db.Timestamptz(3)
+  failedLoginAttempts  Int       @default(0)
+  lockedUntil          DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  agency   Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  sessions Session[]
+
+  auditLogs           AuditLog[]
+  uploadedFiles       StoredFile[]
+  createdReservations Reservation[]              @relation("ReservationCreatedBy")
+  statusChanges       ReservationStatusHistory[]
+  reservationChanges  ReservationChange[]
+  payments            Payment[]
+  securityDeposits    SecurityDeposit[]
+  additionalCharges   AdditionalCharge[]
+  inspections         Inspection[]
+  damageRecords       DamageRecord[]
+  contracts           Contract[]
+  maintenanceRecords  MaintenanceRecord[]
+  maintenanceBlocks   MaintenanceBlock[]
+  vehicleExpenses     VehicleExpense[]
+  vehicleBlocks       VehicleBlock[]
+  customerNotes       CustomerNote[]
+  notifications       Notification[]
+
+  @@unique([agencyId, username])
+  @@index([agencyId])
+  @@map("users")
+}
+
+/// Opaque server-side sessions — see docs/ARCHITECTURE.md §7.
+/// Only the SHA-256 hash of the cookie token is stored.
+model Session {
+  id                String   @id @default(cuid())
+  userId            String
+  tokenHash         String   @unique
+  expiresAt         DateTime @db.Timestamptz(3)
+  absoluteExpiresAt DateTime @db.Timestamptz(3)
+  lastSeenAt        DateTime @default(now()) @db.Timestamptz(3)
+  ipAddress         String?
+  userAgent         String?
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ---------------------------------------------------------------------------
+// Files (spec §85)
+// ---------------------------------------------------------------------------
+
+/// Every uploaded object. PRIVATE files are only reachable through
+/// /api/files/[id], which checks the session and the owning agency first.
+model StoredFile {
+  id           String         @id @default(cuid())
+  agencyId     String
+  bucket       String
+  key          String         @unique
+  contentType  String
+  sizeBytes    Int
+  visibility   FileVisibility @default(PRIVATE)
+  /// Only populated for PUBLIC objects
+  publicUrl    String?
+  originalName String?
+  uploadedById String?
+  createdAt    DateTime       @default(now()) @db.Timestamptz(3)
+
+  agency     Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  uploadedBy User?  @relation(fields: [uploadedById], references: [id])
+
+  agencyLogo        Agency?            @relation("AgencyLogo")
+  agencyHero        Agency?            @relation("AgencyHero")
+  contractStamp     ContractSettings?  @relation("ContractStamp")
+  vehicleImage      VehicleImage?
+  customerDocument  CustomerDocument?
+  inspectionPhoto   InspectionPhoto?
+  damagePhoto       DamagePhoto?
+  expenseReceipt    VehicleExpense?
+  maintenanceReceipt MaintenanceRecord?
+  contractPdf       Contract?
+  signatureImage    Signature?
+
+  @@index([agencyId])
+  @@map("stored_files")
+}
+
+// ---------------------------------------------------------------------------
+// Fleet (spec §16, §17, §18)
+// ---------------------------------------------------------------------------
+
+model Vehicle {
+  id       String @id @default(cuid())
+  agencyId String
+
+  brand        String
+  model        String
+  year         Int
+  category     String
+  transmission Transmission
+  fuelType     FuelType
+  seats        Int
+  doors        Int          @default(5)
+  color        String?
+  features     String[]     @default([])
+
+  registrationNumber String
+  vin                String?
+  currentMileage     Int     @default(0)
+
+  dailyPrice      Decimal  @db.Decimal(12, 2)
+  weeklyPrice     Decimal? @db.Decimal(12, 2)
+  monthlyPrice    Decimal? @db.Decimal(12, 2)
+  securityDeposit Decimal  @default(0) @db.Decimal(12, 2)
+
+  /// Per-vehicle override of the agency mileage policy (spec §45)
+  mileagePolicy   MileagePolicy?
+  mileageKmPerDay Int?
+  extraKmPrice    Decimal?       @db.Decimal(12, 2)
+
+  /// Display only. Availability is always computed — spec §18, §97.11
+  currentStatus VehicleStatus @default(AVAILABLE)
+  isActive      Boolean       @default(true)
+
+  insuranceExpiryAt          DateTime? @db.Timestamptz(3)
+  technicalInspectionExpiryAt DateTime? @db.Timestamptz(3)
+  nextServiceMileage         Int?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  images             VehicleImage[]
+  blocks             VehicleBlock[]
+  reservations       Reservation[]
+  seasonalRates      SeasonalRate[]
+  inspections        Inspection[]
+  damageRecords      DamageRecord[]
+  maintenanceRecords MaintenanceRecord[]
+  maintenanceBlocks  MaintenanceBlock[]
+  expenses           VehicleExpense[]
+
+  @@unique([agencyId, registrationNumber])
+  @@index([agencyId, isActive])
+  @@map("vehicles")
+}
+
+/// spec §17
+model VehicleImage {
+  id        String  @id @default(cuid())
+  agencyId  String
+  vehicleId String
+  fileId    String  @unique
+  isCover   Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  agency  Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  vehicle Vehicle    @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  file    StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, sortOrder])
+  @@map("vehicle_images")
+}
+
+/// THE single source of vehicle occupancy — spec §19, §20, §21, §92.
+///
+/// A GiST exclusion constraint on (vehicleId, period) makes overlapping blocks
+/// impossible to commit, which is what guarantees no double booking under
+/// concurrency. `endsAt` already includes the trailing buffer; see
+/// docs/ARCHITECTURE.md §4. The `period` column is GENERATED ALWAYS in SQL and
+/// is never written by application code.
+model VehicleBlock {
+  id        String           @id @default(cuid())
+  agencyId  String
+  vehicleId String
+  kind      VehicleBlockKind
+
+  startsAt DateTime @db.Timestamptz(3)
+  /// startsAt .. (real end + bufferMinutes)
+  endsAt   DateTime @db.Timestamptz(3)
+  /// Buffer already folded into endsAt; kept for display and recalculation
+  bufferMinutes Int @default(0)
+
+  /// PAYMENT_HOLD only — expired holds are deleted, never left to rot (spec §30)
+  expiresAt DateTime? @db.Timestamptz(3)
+
+  reservationId      String? @unique
+  maintenanceBlockId String? @unique
+  reason             String?
+  createdById        String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  period Unsupported("tstzrange")?
+
+  agency           Agency            @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  vehicle          Vehicle           @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  reservation      Reservation?      @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  maintenanceBlock MaintenanceBlock? @relation(fields: [maintenanceBlockId], references: [id], onDelete: Cascade)
+  createdBy        User?             @relation(fields: [createdById], references: [id])
+
+  @@index([vehicleId, startsAt, endsAt])
+  @@index([agencyId, startsAt])
+  @@index([expiresAt])
+  @@map("vehicle_blocks")
+}
+
+// ---------------------------------------------------------------------------
+// Locations, rates, extras (spec §22, §24, §25)
+// ---------------------------------------------------------------------------
+
+model Location {
+  id        String  @id @default(cuid())
+  agencyId  String
+  name      String
+  address   String?
+  pickupFee Decimal @default(0) @db.Decimal(12, 2)
+  returnFee Decimal @default(0) @db.Decimal(12, 2)
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  pickupReservations Reservation[] @relation("PickupLocation")
+  returnReservations Reservation[] @relation("ReturnLocation")
+
+  @@index([agencyId, isActive])
+  @@map("locations")
+}
+
+/// spec §24 — seasonal pricing. A null vehicleId applies to the whole fleet.
+model SeasonalRate {
+  id         String   @id @default(cuid())
+  agencyId   String
+  vehicleId  String?
+  name       String
+  startDate  DateTime @db.Date
+  endDate    DateTime @db.Date
+  dailyPrice Decimal  @db.Decimal(12, 2)
+  /// Higher wins when two seasons overlap
+  priority   Int      @default(0)
+  isActive   Boolean  @default(true)
+
+  agency  Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId, startDate, endDate])
+  @@map("seasonal_rates")
+}
+
+/// Optional add-ons priced by the engine (spec §25). Definition of "extras" was
+/// left open by the spec — see docs/ARCHITECTURE.md §11.4.
+model Extra {
+  id          String         @id @default(cuid())
+  agencyId    String
+  name        String
+  description String?
+  priceType   ExtraPriceType @default(FLAT)
+  price       Decimal        @db.Decimal(12, 2)
+  isActive    Boolean        @default(true)
+
+  agency             Agency             @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  reservationExtras  ReservationExtra[]
+
+  @@index([agencyId, isActive])
+  @@map("extras")
+}
+
+// ---------------------------------------------------------------------------
+// Customers (spec §34, §35, §36)
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id       String @id @default(cuid())
+  agencyId String
+
+  fullName    String
+  phone       String
+  email       String?
+  nationality String?
+
+  status CustomerStatus @default(NORMAL)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  reservations Reservation[]
+  documents    CustomerDocument[]
+  notes        CustomerNote[]
+
+  /// Phone is the duplicate-detection key, scoped to the agency (spec §34, §35)
+  @@unique([agencyId, phone])
+  @@index([agencyId, fullName])
+  @@map("customers")
+}
+
+model CustomerDocument {
+  id         String @id @default(cuid())
+  agencyId   String
+  customerId String
+
+  documentType       DocumentType
+  documentNumber     String?
+  expiryDate         DateTime?      @db.Date
+  verificationStatus DocumentStatus @default(MISSING)
+  /// Always PRIVATE — spec §36, §85, §97.20
+  fileId             String?        @unique
+  verifiedAt         DateTime?      @db.Timestamptz(3)
+  rejectionReason    String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  agency   Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  customer Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  file     StoredFile? @relation(fields: [fileId], references: [id])
+
+  @@index([customerId])
+  @@map("customer_documents")
+}
+
+/// spec §35 — internal notes
+model CustomerNote {
+  id          String   @id @default(cuid())
+  agencyId    String
+  customerId  String
+  body        String
+  createdById String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  customer  Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdBy User?    @relation(fields: [createdById], references: [id])
+
+  @@index([customerId])
+  @@map("customer_notes")
+}
+
+// ---------------------------------------------------------------------------
+// Reservations (spec §84)
+// ---------------------------------------------------------------------------
+
+model Reservation {
+  id               String @id @default(cuid())
+  agencyId         String
+  bookingReference String
+
+  customerId String
+  vehicleId  String
+
+  pickupLocationId String
+  returnLocationId String
+
+  pickupDatetime DateTime @db.Timestamptz(3)
+  returnDatetime DateTime @db.Timestamptz(3)
+
+  actualPickupDatetime DateTime? @db.Timestamptz(3)
+  actualReturnDatetime DateTime? @db.Timestamptz(3)
+
+  rentalDays Int
+
+  baseAmount     Decimal @db.Decimal(12, 2)
+  pickupFee      Decimal @default(0) @db.Decimal(12, 2)
+  returnFee      Decimal @default(0) @db.Decimal(12, 2)
+  extrasAmount   Decimal @default(0) @db.Decimal(12, 2)
+  discountAmount Decimal @default(0) @db.Decimal(12, 2)
+
+  /// Never overwritten by an override — spec §26, §97.10
+  calculatedTotal      Decimal  @db.Decimal(12, 2)
+  manualOverrideAmount Decimal? @db.Decimal(12, 2)
+  finalTotal           Decimal  @db.Decimal(12, 2)
+
+  /// Denormalised caches recomputed from `payments`; never authoritative (spec §81)
+  amountPaid      Decimal @default(0) @db.Decimal(12, 2)
+  amountRemaining Decimal @default(0) @db.Decimal(12, 2)
+
+  /// Kept separate from revenue at every level — spec §10, §28, §97.8
+  securityDepositRequired Decimal @default(0) @db.Decimal(12, 2)
+
+  currency      String            @default("MAD")
+  status        ReservationStatus @default(AWAITING_CONFIRMATION)
+  paymentStatus PaymentStatus     @default(UNPAID)
+
+  /// Snapshot of the pricing engine's itemised breakdown at creation time
+  pricingBreakdown Json?
+
+  cancellationReason CancellationReason?
+  cancellationNote   String?
+  customerNote       String?
+  internalNote       String?
+
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  confirmedAt DateTime? @db.Timestamptz(3)
+  cancelledAt DateTime? @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  /// Null when the reservation came from the public website
+  createdById String?
+
+  agency         Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  customer       Customer @relation(fields: [customerId], references: [id])
+  vehicle        Vehicle  @relation(fields: [vehicleId], references: [id])
+  pickupLocation Location @relation("PickupLocation", fields: [pickupLocationId], references: [id])
+  returnLocation Location @relation("ReturnLocation", fields: [returnLocationId], references: [id])
+  createdBy      User?    @relation("ReservationCreatedBy", fields: [createdById], references: [id])
+
+  block             VehicleBlock?
+  statusHistory     ReservationStatusHistory[]
+  changes           ReservationChange[]
+  extras            ReservationExtra[]
+  payments          Payment[]
+  securityDeposit   SecurityDeposit?
+  additionalCharges AdditionalCharge[]
+  inspections       Inspection[]
+  damageRecords     DamageRecord[]
+  contracts         Contract[]
+
+  @@unique([agencyId, bookingReference])
+  @@index([agencyId, status])
+  @@index([agencyId, pickupDatetime])
+  @@index([agencyId, returnDatetime])
+  @@index([vehicleId])
+  @@index([customerId])
+  @@map("reservations")
+}
+
+model ReservationStatusHistory {
+  id            String             @id @default(cuid())
+  agencyId      String
+  reservationId String
+  fromStatus    ReservationStatus?
+  toStatus      ReservationStatus
+  reason        String?
+  changedById   String?
+  createdAt     DateTime           @default(now()) @db.Timestamptz(3)
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  changedBy   User?       @relation(fields: [changedById], references: [id])
+
+  @@index([reservationId, createdAt])
+  @@map("reservation_status_history")
+}
+
+/// spec §26, §55, §56 — modifications, extensions and price overrides.
+/// Append-only: history is never rewritten.
+model ReservationChange {
+  id            String                @id @default(cuid())
+  agencyId      String
+  reservationId String
+  changeType    ReservationChangeType
+  oldValues     Json
+  newValues     Json
+  priceDelta    Decimal?              @db.Decimal(12, 2)
+  reason        String?
+  changedById   String?
+  createdAt     DateTime              @default(now()) @db.Timestamptz(3)
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  changedBy   User?       @relation(fields: [changedById], references: [id])
+
+  @@index([reservationId, createdAt])
+  @@map("reservation_changes")
+}
+
+/// Priced extras are snapshotted onto the reservation so later catalogue edits
+/// never rewrite an existing booking's total.
+model ReservationExtra {
+  id            String         @id @default(cuid())
+  agencyId      String
+  reservationId String
+  extraId       String?
+  name          String
+  priceType     ExtraPriceType
+  unitPrice     Decimal        @db.Decimal(12, 2)
+  quantity      Int            @default(1)
+  amount        Decimal        @db.Decimal(12, 2)
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  extra       Extra?      @relation(fields: [extraId], references: [id])
+
+  @@index([reservationId])
+  @@map("reservation_extras")
+}
+
+// ---------------------------------------------------------------------------
+// Money (spec §31, §32, §33, §48, §81)
+// ---------------------------------------------------------------------------
+
+/// One row per transaction. A reservation's paid total is always SUM(payments),
+/// never a boolean and never an overwritten field. (spec §31)
+model Payment {
+  id            String @id @default(cuid())
+  agencyId      String
+  reservationId String
+
+  type   TransactionType
+  amount Decimal         @db.Decimal(12, 2)
+  method PaymentMethod
+  status TransactionStatus @default(COMPLETED)
+
+  currency              String  @default("MAD")
+  /// Provider reference only. Never card data. (spec §87)
+  transactionReference  String?
+  provider              String?
+  notes                 String?
+
+  /// Set on refunds to point at the original transaction
+  refundOfId String?
+
+  createdById String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  createdBy   User?       @relation(fields: [createdById], references: [id])
+  refundOf    Payment?    @relation("PaymentRefund", fields: [refundOfId], references: [id])
+  refunds     Payment[]   @relation("PaymentRefund")
+
+  @@index([agencyId, createdAt])
+  @@index([reservationId])
+  @@map("payments")
+}
+
+/// spec §28, §33 — tracked entirely separately from rental revenue
+model SecurityDeposit {
+  id            String @id @default(cuid())
+  agencyId      String
+  reservationId String @unique
+
+  requiredAmount  Decimal       @db.Decimal(12, 2)
+  collectedAmount Decimal       @default(0) @db.Decimal(12, 2)
+  refundedAmount  Decimal       @default(0) @db.Decimal(12, 2)
+  retainedAmount  Decimal       @default(0) @db.Decimal(12, 2)
+  method          PaymentMethod?
+  status          DepositStatus @default(REQUIRED)
+  currency        String        @default("MAD")
+
+  collectedAt DateTime? @db.Timestamptz(3)
+  settledAt   DateTime? @db.Timestamptz(3)
+  notes       String?
+
+  createdById String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  createdBy   User?       @relation(fields: [createdById], references: [id])
+
+  @@index([agencyId, status])
+  @@map("security_deposits")
+}
+
+/// spec §48 — charges raised at return
+model AdditionalCharge {
+  id            String @id @default(cuid())
+  agencyId      String
+  reservationId String
+
+  type        AdditionalChargeType
+  description String?
+  amount      Decimal              @db.Decimal(12, 2)
+  currency    String               @default("MAD")
+  /// spec §33 — deduct from deposit vs. customer pays separately
+  settleFromDeposit Boolean @default(false)
+
+  damageRecordId String?  @unique
+  createdById    String?
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  agency       Agency        @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  reservation  Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  damageRecord DamageRecord? @relation(fields: [damageRecordId], references: [id])
+  createdBy    User?         @relation(fields: [createdById], references: [id])
+
+  @@index([reservationId])
+  @@map("additional_charges")
+}
+
+// ---------------------------------------------------------------------------
+// Inspections and damage (spec §38, §39, §43, §47)
+// ---------------------------------------------------------------------------
+
+/// Pickup and return inspections share one table with a `type` discriminator.
+/// The spec listed them as two tables (§83); unifying them is what makes the
+/// BEFORE/AFTER comparison in §43 a single query instead of a union, and avoids
+/// duplicating the photo and damage relations. Permitted by §83's closing note.
+model Inspection {
+  id            String @id @default(cuid())
+  agencyId      String
+  reservationId String
+  vehicleId     String
+
+  type        InspectionType
+  performedAt DateTime       @db.Timestamptz(3)
+
+  /// Nullable while an inspection is in progress: an employee may confirm the
+  /// damage walk-around before typing the odometer in. The completion gate is
+  /// what insists both are present before the car leaves.
+  mileage   Int?
+  /// 0-100
+  fuelLevel Int?
+
+  condition String?
+  notes     String?
+
+  /// When the employee confirmed the damage walk-around (spec §39, §40).
+  /// Nullable because "no damage found" and "not yet checked" are different
+  /// facts, and the checklist must not treat the second as the first.
+  damageCheckedAt DateTime? @db.Timestamptz(3)
+
+  employeeId String?
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  vehicle     Vehicle     @relation(fields: [vehicleId], references: [id])
+  employee    User?       @relation(fields: [employeeId], references: [id])
+
+  photos        InspectionPhoto[]
+  damageRecords DamageRecord[]
+
+  @@unique([reservationId, type])
+  @@index([vehicleId])
+  @@map("inspections")
+}
+
+model InspectionPhoto {
+  id           String        @id @default(cuid())
+  agencyId     String
+  inspectionId String
+  fileId       String        @unique
+  position     PhotoPosition @default(OTHER)
+  sortOrder    Int           @default(0)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+
+  agency     Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  inspection Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  file       StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([inspectionId, sortOrder])
+  @@map("inspection_photos")
+}
+
+/// spec §39, §47 — manual only. No AI damage detection in V1 (spec §90).
+model DamageRecord {
+  id            String  @id @default(cuid())
+  agencyId      String
+  vehicleId     String
+  reservationId String?
+  inspectionId  String?
+
+  location    String
+  damageType  String
+  description String?
+  /// True when recorded at pickup as pre-existing (spec §39)
+  isPreExisting Boolean @default(false)
+
+  estimatedCharge Decimal? @db.Decimal(12, 2)
+  confirmedCharge Decimal? @db.Decimal(12, 2)
+
+  createdById String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  agency      Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  vehicle     Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  reservation Reservation? @relation(fields: [reservationId], references: [id])
+  inspection  Inspection?  @relation(fields: [inspectionId], references: [id])
+  createdBy   User?        @relation(fields: [createdById], references: [id])
+
+  photos           DamagePhoto[]
+  additionalCharge AdditionalCharge?
+
+  @@index([vehicleId])
+  @@index([reservationId])
+  @@map("damage_records")
+}
+
+model DamagePhoto {
+  id             String   @id @default(cuid())
+  agencyId       String
+  damageRecordId String
+  fileId         String   @unique
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  agency       Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  damageRecord DamageRecord @relation(fields: [damageRecordId], references: [id], onDelete: Cascade)
+  file         StoredFile   @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([damageRecordId])
+  @@map("damage_photos")
+}
+
+// ---------------------------------------------------------------------------
+// Contracts (spec §50, §51, §52, §88)
+// ---------------------------------------------------------------------------
+
+/// Immutable once SIGNED. A change creates a new version and marks the previous
+/// row SUPERSEDED — the original, its PDF and its signature are preserved.
+model Contract {
+  id            String @id @default(cuid())
+  agencyId      String
+  reservationId String
+
+  contractNumber String
+  version        Int    @default(1)
+  status         ContractStatus @default(DRAFT)
+
+  /// Full rendered snapshot: agency, customer, vehicle, pricing, terms
+  contentSnapshot Json
+  pdfFileId       String? @unique
+
+  supersedesId String? @unique
+
+  generatedById String?
+  generatedAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  pdfFile     StoredFile? @relation(fields: [pdfFileId], references: [id])
+  generatedBy User?       @relation(fields: [generatedById], references: [id])
+  supersedes  Contract?   @relation("ContractVersion", fields: [supersedesId], references: [id])
+  supersededBy Contract?  @relation("ContractVersion")
+
+  signature Signature?
+
+  @@unique([agencyId, contractNumber, version])
+  @@index([reservationId])
+  @@map("contracts")
+}
+
+/// spec §52
+model Signature {
+  id         String @id @default(cuid())
+  agencyId   String
+  contractId String @unique
+
+  /// The signature bitmap, when object storage is configured.
+  signatureFileId String? @unique
+  /// Inline `data:image/png;base64,...` fallback so a customer can sign at the
+  /// counter before storage is set up. A signature PNG is a few kilobytes;
+  /// refusing to capture one until S3 exists would block the whole handover.
+  signatureData   String?
+
+  signerName      String
+  signedAt        DateTime @db.Timestamptz(3)
+  contractVersion Int
+  signerIp        String?
+  termsAccepted   Boolean  @default(true)
+
+  agency        Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  contract      Contract    @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  signatureFile StoredFile? @relation(fields: [signatureFileId], references: [id])
+
+  @@map("signatures")
+}
+
+// ---------------------------------------------------------------------------
+// Maintenance and expenses (spec §57–§62)
+// ---------------------------------------------------------------------------
+
+model MaintenanceRecord {
+  id        String @id @default(cuid())
+  agencyId  String
+  vehicleId String
+
+  category    MaintenanceCategory
+  description String?
+  cost        Decimal?            @db.Decimal(12, 2)
+
+  /// Due by date or by odometer reading (spec §57)
+  dueDate     DateTime? @db.Timestamptz(3)
+  dueMileage  Int?
+  performedAt DateTime? @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+
+  mileageAtService Int?
+  notes            String?
+  receiptFileId    String? @unique
+
+  createdById String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  vehicle     Vehicle     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  receiptFile StoredFile? @relation(fields: [receiptFileId], references: [id])
+  createdBy   User?       @relation(fields: [createdById], references: [id])
+
+  blocks MaintenanceBlock[]
+
+  @@index([vehicleId])
+  @@index([agencyId, dueDate])
+  @@map("maintenance_records")
+}
+
+/// spec §58 — writes a matching VehicleBlock so availability sees it
+model MaintenanceBlock {
+  id        String @id @default(cuid())
+  agencyId  String
+  vehicleId String
+
+  startsAt DateTime @db.Timestamptz(3)
+  endsAt   DateTime @db.Timestamptz(3)
+  reason   String?
+
+  maintenanceRecordId String?
+  createdById         String?
+  createdAt           DateTime @default(now()) @db.Timestamptz(3)
+
+  agency            Agency             @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  vehicle           Vehicle            @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  maintenanceRecord MaintenanceRecord? @relation(fields: [maintenanceRecordId], references: [id])
+  createdBy         User?              @relation(fields: [createdById], references: [id])
+
+  vehicleBlock VehicleBlock?
+
+  @@index([vehicleId, startsAt])
+  @@map("maintenance_blocks")
+}
+
+/// spec §60
+model VehicleExpense {
+  id        String @id @default(cuid())
+  agencyId  String
+  vehicleId String
+
+  category      ExpenseCategory
+  amount        Decimal         @db.Decimal(12, 2)
+  currency      String          @default("MAD")
+  expenseDate   DateTime        @db.Timestamptz(3)
+  notes         String?
+  receiptFileId String?         @unique
+
+  createdById String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  agency      Agency      @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  vehicle     Vehicle     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  receiptFile StoredFile? @relation(fields: [receiptFileId], references: [id])
+  createdBy   User?       @relation(fields: [createdById], references: [id])
+
+  @@index([vehicleId, expenseDate])
+  @@index([agencyId, expenseDate])
+  @@map("vehicle_expenses")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications and audit (spec §67, §80, §82)
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id       String @id @default(cuid())
+  agencyId String
+  /// Null = every user in the agency
+  userId   String?
+  /// Null = both roles; OWNER restricts to owners (spec §67)
+  visibleToRole Role?
+
+  type       NotificationType
+  title      String
+  body       String?
+  entityType String?
+  entityId   String?
+
+  readAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId, createdAt])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+/// spec §80 — append-only. Never updated, never deleted.
+model AuditLog {
+  id       String @id @default(cuid())
+  agencyId String
+  userId   String?
+
+  action     String
+  entityType String
+  entityId   String?
+  oldValue   Json?
+  newValue   Json?
+  reason     String?
+  ipAddress  String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id])
+
+  @@index([agencyId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}

@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# keep the template committed
+!.env.example
+
+# local development object storage
+/.storage
+
