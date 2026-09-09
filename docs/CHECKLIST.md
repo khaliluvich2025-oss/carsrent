@@ -194,9 +194,8 @@ Tick items as they land.
 - [x] Team management: add / disable / reset password, sessions revoked on both
 - [x] Service layer for agency profile, branding, languages, currency, working
       hours and rental conditions (validated, audited)
-- [ ] Editing screens for agency profile / branding / hours / conditions — the
-      services exist and are tested; the forms are not built
-- [ ] Logo and hero upload — needs object storage
+- [x] Editing screens: profile, branding, languages/currency, hours & conditions
+- [x] Logo and hero upload through the storage driver
 - [ ] Employee activity view (query exists, no screen)
 
 ## Phase 15 — Communication

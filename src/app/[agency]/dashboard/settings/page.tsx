@@ -27,7 +27,12 @@ export default async function SettingsPage({
     await Promise.all([
       db.agency.findUnique({
         where: { id: ctx.user.agencyId },
-        select: { name: true, currency: true, timezone: true },
+        select: {
+        name: true,
+        currency: true,
+        timezone: true,
+        enabledLocales: true,
+      },
       }),
       ctx.db.agencySettings.findFirst({
         select: {
@@ -47,6 +52,12 @@ export default async function SettingsPage({
   const teamCount = await ctx.db.user.count({ where: { isActive: true } });
 
   const sections = [
+    {
+      href: `${base}/agency`,
+      icon: <IconSettings />,
+      title: "Agency",
+      description: `${agency?.name} · ${agency?.currency} · ${agency?.enabledLocales.join(", ")} · ${agency?.timezone}`,
+    },
     {
       href: `${base}/locations`,
       icon: <IconMapPin />,
@@ -106,11 +117,6 @@ export default async function SettingsPage({
         ))}
       </div>
 
-      <p className="mt-5 text-sm text-ink-muted">
-        Agency information, branding, languages, working hours and contract
-        policy text are stored and used throughout the product, but their
-        editing screens are not built yet — the seeded values apply.
-      </p>
     </>
   );
 }

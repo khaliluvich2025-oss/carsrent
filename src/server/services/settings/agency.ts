@@ -13,6 +13,23 @@ import type { TenantDb } from "@/server/tenant";
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
+export class SettingsError extends Error {
+  constructor(
+    readonly field: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SettingsError";
+  }
+}
+
+/**
+ * Identity and contact details (spec §75).
+ *
+ * Deliberately separate from branding and localisation below: each settings
+ * screen saves only the fields it shows, so a form can never blank out a value
+ * it did not display.
+ */
 export const agencyProfileSchema = z.object({
   name: requiredText("Agency name is required", 120),
   phone: optionalText,
@@ -22,15 +39,6 @@ export const agencyProfileSchema = z.object({
   city: optionalText,
   googleMapsUrl: optionalText,
   shortDescription: optionalText,
-  primaryColor: z.string().trim().regex(HEX, "Use a colour like #c2410c"),
-  secondaryColor: z.string().trim().regex(HEX, "Use a colour like #0f172a"),
-  timezone: requiredText("Timezone is required", 60),
-  currency: z
-    .string()
-    .trim()
-    .regex(/^[A-Z]{3}$/, "Use a 3-letter code like MAD"),
-  defaultLocale: z.enum(["EN", "FR", "AR"]),
-  enabledLocales: z.array(z.enum(["EN", "FR", "AR"])).min(1, "Enable at least one language"),
 });
 
 export type AgencyProfileInput = z.infer<typeof agencyProfileSchema>;
@@ -39,8 +47,70 @@ export async function updateAgencyProfile(
   agencyId: string,
   input: AgencyProfileInput,
 ) {
+  if (input.phone && !isPlausiblePhone(input.phone)) {
+    throw new SettingsError("phone", "Enter a valid phone number.");
+  }
+  if (input.whatsapp && !isPlausiblePhone(input.whatsapp)) {
+    throw new SettingsError("whatsapp", "Enter a valid WhatsApp number.");
+  }
+
+  return db.agency.update({
+    where: { id: agencyId },
+    data: {
+      name: input.name,
+      phone: input.phone ? normalizePhone(input.phone) : null,
+      whatsapp: input.whatsapp ? normalizePhone(input.whatsapp) : null,
+      email: input.email,
+      address: input.address,
+      city: input.city,
+      googleMapsUrl: input.googleMapsUrl,
+      shortDescription: input.shortDescription,
+    },
+    select: { id: true },
+  });
+}
+
+/** Branding (spec §76). Colours drive both the dashboard and the website. */
+export const brandingSchema = z.object({
+  primaryColor: z.string().trim().regex(HEX, "Use a colour like #c2410c"),
+  secondaryColor: z.string().trim().regex(HEX, "Use a colour like #0f172a"),
+});
+
+export type BrandingInput = z.infer<typeof brandingSchema>;
+
+export async function updateBranding(agencyId: string, input: BrandingInput) {
+  return db.agency.update({
+    where: { id: agencyId },
+    data: {
+      primaryColor: input.primaryColor,
+      secondaryColor: input.secondaryColor,
+    },
+    select: { id: true },
+  });
+}
+
+/** Languages, currency and timezone (spec §8, §74, §93, §94). */
+export const localisationSchema = z.object({
+  timezone: requiredText("Timezone is required", 60),
+  currency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{3}$/, "Use a 3-letter code like MAD"),
+  defaultLocale: z.enum(["EN", "FR", "AR"]),
+  enabledLocales: z
+    .array(z.enum(["EN", "FR", "AR"]))
+    .min(1, "Enable at least one language"),
+});
+
+export type LocalisationInput = z.infer<typeof localisationSchema>;
+
+export async function updateLocalisation(
+  agencyId: string,
+  input: LocalisationInput,
+) {
   // The default language must be one the agency actually offers, or the public
-  // site would try to render a language the switcher does not show.
+  // site would try to render a language its own switcher does not show.
   const enabled = input.enabledLocales.includes(input.defaultLocale)
     ? input.enabledLocales
     : [...input.enabledLocales, input.defaultLocale];
@@ -48,16 +118,6 @@ export async function updateAgencyProfile(
   return db.agency.update({
     where: { id: agencyId },
     data: {
-      name: input.name,
-      phone: input.phone,
-      whatsapp: input.whatsapp,
-      email: input.email,
-      address: input.address,
-      city: input.city,
-      googleMapsUrl: input.googleMapsUrl,
-      shortDescription: input.shortDescription,
-      primaryColor: input.primaryColor,
-      secondaryColor: input.secondaryColor,
       timezone: input.timezone,
       currency: input.currency,
       defaultLocale: input.defaultLocale,

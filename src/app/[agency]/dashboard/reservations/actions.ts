@@ -61,7 +61,19 @@ export async function confirmReservationAction(
   const id = text(formData, "reservationId");
   if (!id) return;
 
-  await confirmReservation(ctx.db, id, ctx.user.userId);
+  try {
+    await confirmReservation(ctx.db, id, ctx.user.userId);
+  } catch (error) {
+    // Double-submitting Confirm is the common case here: the reservation is
+    // already where the click was trying to move it, so revalidate and let the
+    // page redraw rather than showing an error for work already done.
+    if (error instanceof InvalidTransitionError) {
+      revalidate(slug, id);
+      return;
+    }
+    throw error;
+  }
+
   await ctx.db.auditLog.create({
     data: {
       agencyId: ctx.db.$agencyId,
@@ -83,7 +95,12 @@ export async function markReadyAction(
   const id = text(formData, "reservationId");
   if (!id) return;
 
-  await markReadyForPickup(ctx.db, id, ctx.user.userId);
+  try {
+    await markReadyForPickup(ctx.db, id, ctx.user.userId);
+  } catch (error) {
+    if (!(error instanceof InvalidTransitionError)) throw error;
+  }
+
   revalidate(slug, id);
 }
 
