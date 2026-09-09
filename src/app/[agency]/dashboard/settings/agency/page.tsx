@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { PageHeader } from "@/components/ui/page-header";
@@ -145,7 +146,7 @@ export default async function AgencySettingsPage({
       <div className="no-scrollbar -mx-4 mb-5 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <div className="flex gap-2">
           {SECTIONS.map((item) => (
-            <a
+            <Link
               key={item.key}
               href={`${base}/agency?section=${item.key}`}
               className={`shrink-0 rounded-full border px-3.5 py-2 text-sm font-medium transition ${
@@ -155,7 +156,7 @@ export default async function AgencySettingsPage({
               }`}
             >
               {item.label}
-            </a>
+            </Link>
           ))}
         </div>
       </div>

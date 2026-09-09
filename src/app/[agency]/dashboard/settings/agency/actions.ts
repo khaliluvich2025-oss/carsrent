@@ -29,6 +29,11 @@ export type SettingsState = {
   errors?: Record<string, string>;
   message?: string;
   saved?: boolean;
+  /**
+   * The URL of a just-uploaded image. The form swaps its preview to this the
+   * moment the upload lands, rather than waiting for the revalidated page.
+   */
+  imageUrl?: string;
 };
 
 const text = (formData: FormData, name: string) =>
@@ -178,7 +183,7 @@ export async function uploadBrandImageAction(
 
   await audit(ctx, "settings.branding_image", { kind });
   revalidateAll(slug);
-  return { saved: true };
+  return { saved: true, imageUrl: uploaded.publicUrl ?? undefined };
 }
 
 export async function saveLocalisationAction(

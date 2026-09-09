@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { Button } from "@/components/ui/button";
@@ -156,6 +156,18 @@ function ColourField({
   );
 }
 
+/** Mirrors MAX_IMAGE_BYTES in src/server/storage/driver.ts, which enforces it. */
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/avif"];
+
+/**
+ * Picking a photo IS the upload.
+ *
+ * Choosing a file and then remembering to press a second button was a step
+ * people skipped, so the picker submits the form itself. The chosen file is
+ * previewed from the browser's own copy straight away, which means the new
+ * photo is on screen while the bytes are still travelling.
+ */
 function ImageUpload({
   action,
   kind,
@@ -163,6 +175,7 @@ function ImageUpload({
   hint,
   currentUrl,
   storageReady,
+  fit,
 }: {
   action: Action;
   kind: "logo" | "hero";
@@ -170,26 +183,84 @@ function ImageUpload({
   hint: string;
   currentUrl: string | null;
   storageReady: boolean;
+  fit: "contain" | "cover";
 }) {
-  const [state, formAction] = useActionState<SettingsState, FormData>(action, {});
+  const [state, formAction, pending] = useActionState<SettingsState, FormData>(
+    action,
+    {},
+  );
+  const formRef = useRef<HTMLFormElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [chosen, setChosen] = useState<string | null>(null);
+  const previewRef = useRef<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    };
+  }, []);
+
+  const choose = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Both checks are repeated on the server; catching them here saves the
+    // round trip and gives a sentence instead of a failed request.
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      setLocalError("Use a JPEG, PNG, WebP or AVIF image.");
+      event.target.value = "";
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setLocalError(
+        `That image is ${(file.size / 1024 / 1024).toFixed(1)} MB. The limit is 8 MB.`,
+      );
+      event.target.value = "";
+      return;
+    }
+
+    setLocalError(null);
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    previewRef.current = URL.createObjectURL(file);
+    setPreview(previewRef.current);
+    formRef.current?.requestSubmit();
+  };
+
+  // While the bytes are in flight the browser's own copy is the truth; once the
+  // upload lands the stored URL is; and if it failed, whatever is really saved.
+  const shown = pending
+    ? (preview ?? currentUrl)
+    : state.message
+      ? currentUrl
+      : (state.imageUrl ?? preview ?? currentUrl);
 
   return (
-    <form action={formAction} className="space-y-2">
+    <form ref={formRef} action={formAction} className="space-y-2">
       <input type="hidden" name="kind" value={kind} />
       <p className="text-sm font-medium text-ink-soft">{label}</p>
 
       <div className="flex items-center gap-3">
-        <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-surface-sunken">
-          {currentUrl ? (
+        <div className="relative flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-line bg-surface-sunken">
+          {shown ? (
             /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={currentUrl} alt="" className="h-full w-full object-contain" />
+            <img
+              src={shown}
+              alt=""
+              className={`h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"} ${
+                pending ? "opacity-40" : ""
+              }`}
+            />
           ) : (
             <span className="text-ink-muted/50">
               <IconImage size={22} />
             </span>
           )}
+          {pending ? (
+            <span className="absolute inset-0 flex items-center justify-center bg-surface/60 text-[11px] font-medium text-ink-soft">
+              Uploading…
+            </span>
+          ) : null}
         </div>
 
         <div className="min-w-0 flex-1">
@@ -197,9 +268,9 @@ function ImageUpload({
             ref={inputRef}
             type="file"
             name="image"
-            accept="image/jpeg,image/png,image/webp,image/avif"
-            disabled={!storageReady}
-            onChange={(event) => setChosen(event.target.files?.[0]?.name ?? null)}
+            accept={ACCEPTED_TYPES.join(",")}
+            disabled={!storageReady || pending}
+            onChange={choose}
             className="sr-only"
           />
           <div className="flex flex-wrap items-center gap-2">
@@ -207,26 +278,27 @@ function ImageUpload({
               type="button"
               variant="secondary"
               size="sm"
-              disabled={!storageReady}
+              disabled={!storageReady || pending}
               onClick={() => inputRef.current?.click()}
             >
-              Choose file
+              {pending
+                ? "Uploading…"
+                : shown
+                  ? "Replace photo"
+                  : "Choose photo"}
             </Button>
-            <Button type="submit" size="sm" disabled={!storageReady}>
-              Upload
-            </Button>
-            {chosen ? (
-              <span className="truncate text-xs text-ink-muted">{chosen}</span>
-            ) : null}
-            {state.saved ? (
-              <span className="text-sm text-positive">Updated</span>
+            {state.saved && !pending ? (
+              <span className="inline-flex items-center gap-1.5 text-sm text-positive">
+                <IconCheck size={16} />
+                Updated
+              </span>
             ) : null}
           </div>
           <p className="mt-1 text-xs text-ink-muted">{hint}</p>
         </div>
       </div>
 
-      <FormError>{state.message}</FormError>
+      <FormError>{localError ?? state.message}</FormError>
     </form>
   );
 }
@@ -297,6 +369,7 @@ export function BrandingForm({
             kind="logo"
             label="Logo"
             hint="Square or wide, on a transparent background if you have one."
+            fit="contain"
             currentUrl={values.logoUrl}
             storageReady={storageReady}
           />
@@ -306,6 +379,7 @@ export function BrandingForm({
               kind="hero"
               label="Hero image"
               hint="The photo behind your homepage headline. Wide, at least 1600px."
+              fit="cover"
               currentUrl={values.heroUrl}
               storageReady={storageReady}
             />
