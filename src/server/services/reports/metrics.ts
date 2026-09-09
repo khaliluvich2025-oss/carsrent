@@ -42,8 +42,10 @@ export async function getHeadlineMetrics(
     earned,
     refunded,
     created,
-    byStatus,
+    completedCount,
     completedInPeriod,
+    cancelledCount,
+    onRoad,
     expenses,
     outstanding,
     deposits,
@@ -59,14 +61,27 @@ export async function getHeadlineMetrics(
       where: { status: "COMPLETED", type: "REFUND", createdAt: window },
     }),
     db.reservation.count({ where: { createdAt: window } }),
-    db.reservation.groupBy({
-      by: ["status"],
-      where: { createdAt: window },
-      _count: { _all: true },
-    }),
+    // Counted by when they actually happened, not by when they were booked:
+    // a rental completed this month may well have been booked last month, and
+    // the old version disagreed with the revenue figure beside it.
+    db.reservation.count({ where: { status: "COMPLETED", completedAt: window } }),
     db.reservation.findMany({
       where: { status: "COMPLETED", completedAt: window },
       select: { rentalDays: true, finalTotal: true },
+    }),
+    db.reservation.count({
+      where: { status: { in: ["CANCELLED", "NO_SHOW"] }, cancelledAt: window },
+    }),
+    // Utilisation counts every rental standing on the road during the period,
+    // not only the ones that happened to finish inside it — otherwise a car out
+    // on a long rental reads as idle.
+    db.reservation.findMany({
+      where: {
+        status: { notIn: ["CANCELLED", "NO_SHOW"] },
+        pickupDatetime: { lt: period.end },
+        returnDatetime: { gt: period.start },
+      },
+      select: { pickupDatetime: true, returnDatetime: true },
     }),
     db.vehicleExpense.aggregate({
       _sum: { amount: true },
@@ -106,19 +121,18 @@ export async function getHeadlineMetrics(
 
   const revenue = subtract(earned._sum.amount ?? 0, refunded._sum.amount ?? 0);
 
-  const counts: Record<string, number> = {};
-  for (const row of byStatus) counts[row.status] = row._count._all;
-
-  const rentedDays = completedInPeriod.reduce(
-    (total, row) => total + row.rentalDays,
-    0,
-  );
+  // Days each rental actually occupied within the window, clipped to it.
+  const rentedDays = onRoad.reduce((total, row) => {
+    const from = Math.max(row.pickupDatetime.getTime(), period.start.getTime());
+    const to = Math.min(row.returnDatetime.getTime(), period.end.getTime());
+    return total + Math.max(0, Math.ceil((to - from) / 86_400_000));
+  }, 0);
 
   return {
     revenue: revenue.toFixed(2),
     reservations: created,
-    completed: counts.COMPLETED ?? 0,
-    cancelled: (counts.CANCELLED ?? 0) + (counts.NO_SHOW ?? 0),
+    completed: completedCount,
+    cancelled: cancelledCount,
     averageBookingValue: computeAverageBookingValue(
       sum(...completedInPeriod.map((row) => row.finalTotal)),
       completedInPeriod.length,

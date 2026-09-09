@@ -8,10 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Field, FormError, Input, Textarea } from "@/components/ui/field";
 import { IconAlert } from "@/components/ui/icons";
-import type { Translator } from "@/lib/i18n";
 import type { BookingState } from "./actions";
 
-function SubmitButton({ labels }: { labels: Translator }) {
+function SubmitButton({ labels }: { labels: (key: string) => string }) {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" size="lg" className="w-full" disabled={pending}>
@@ -22,17 +21,21 @@ function SubmitButton({ labels }: { labels: Translator }) {
 
 export function BookingForm({
   action,
-  labels,
+  messages,
   extras,
   alternativesHref,
   currency,
 }: {
   action: (state: BookingState, formData: FormData) => Promise<BookingState>;
-  labels: Translator;
+  messages: Record<string, string>;
   extras: { id: string; name: string; description: string | null; price: string; perDay: boolean }[];
   alternativesHref: string;
   currency: string;
 }) {
+  // A function cannot cross the server/client boundary, so the translator is
+  // rebuilt here from the plain message map the server passed down.
+  const labels = (key: string) => messages[key] ?? key;
+
   const [state, formAction] = useActionState<BookingState, FormData>(
     action,
     {},

@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { IconShield } from "@/components/ui/icons";
 import { formatInTimezone } from "@/lib/dates";
-import { getTranslator, resolveLocale } from "@/lib/i18n";
+import { getMessages, getTranslator, resolveLocale } from "@/lib/i18n";
 import { formatMoney } from "@/lib/money";
 import { isVehicleAvailable } from "@/server/services/availability/search";
 import {
@@ -118,7 +118,7 @@ export default async function BookPage({
               vehicleId,
               searchForAction,
             )}
-            labels={t}
+            messages={getMessages(locale)}
             extras={extras.map((extra) => ({
               id: extra.id,
               name: extra.name,

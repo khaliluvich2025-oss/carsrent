@@ -142,7 +142,7 @@ export default async function CalendarPage({
 
   const legend = [
     { label: "Reserved / rented", className: "bg-[var(--brand)]" },
-    { label: "Maintenance", className: "bg-caution" },
+    { label: "Maintenance", className: "bg-ink-soft" },
     { label: "Manually blocked", className: "bg-ink-muted" },
     { label: "Checkout hold", className: "bg-line-strong" },
   ];

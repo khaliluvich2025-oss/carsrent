@@ -55,6 +55,17 @@ export function getTranslator(locale: Locale): Translator {
   };
 }
 
+/**
+ * The raw messages for a locale, as a plain object.
+ *
+ * Client components cannot receive the translator itself — a function is not
+ * serialisable across the server/client boundary — so they take this and build
+ * their own translator from it.
+ */
+export function getMessages(locale: Locale): Record<string, string> {
+  return DICTIONARIES[locale] ?? DICTIONARIES.EN;
+}
+
 export {
   LOCALES,
   LOCALE_NAMES,

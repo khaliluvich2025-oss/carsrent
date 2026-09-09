@@ -8,6 +8,11 @@ import { z } from "zod";
 const schema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   DIRECT_URL: z.string().optional(),
+  /**
+   * Maximum connections in the pool. Left unset, the pg default applies.
+   * Pinned to 1 against a single-threaded development database.
+   */
+  DATABASE_POOL_MAX: z.coerce.number().int().positive().optional(),
 
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be at least 32 characters"),
   SESSION_IDLE_DAYS: z.coerce.number().int().positive().default(7),

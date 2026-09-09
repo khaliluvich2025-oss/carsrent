@@ -37,7 +37,11 @@ export type GridColumn = { label: string; sublabel?: string; isToday?: boolean }
 
 const KIND_STYLES = {
   RESERVATION: "bg-[var(--brand)] text-[var(--brand-ink)]",
-  MAINTENANCE: "bg-caution text-white",
+  // Slate rather than amber: against a warm brand colour the two were
+  // indistinguishable, and "booked" versus "off the road" is the single most
+  // important distinction on this screen.
+  MAINTENANCE:
+    "bg-ink-soft text-white [background-image:repeating-linear-gradient(45deg,transparent,transparent_5px,rgba(255,255,255,0.16)_5px,rgba(255,255,255,0.16)_10px)]",
   MANUAL: "bg-ink-muted text-white",
   PAYMENT_HOLD:
     "bg-surface text-ink-soft ring-1 ring-inset ring-line-strong [background-image:repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(15,23,42,0.06)_4px,rgba(15,23,42,0.06)_8px)]",

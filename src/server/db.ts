@@ -22,7 +22,12 @@ const globalForPrisma = globalThis as unknown as {
 function createClient(): PrismaClient {
   // Prisma 7 runs on the query compiler, so the connection is owned by a driver
   // adapter rather than by the schema. DATABASE_URL is the pooled URL.
-  const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });
+  const adapter = new PrismaPg({
+    connectionString: env.DATABASE_URL,
+    // Unset in production, where the pg default applies. Pinned to 1
+    // against the single-threaded development database.
+    ...(env.DATABASE_POOL_MAX ? { max: env.DATABASE_POOL_MAX } : {}),
+  });
 
   return new PrismaClient({
     adapter,

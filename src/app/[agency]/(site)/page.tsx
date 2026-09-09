@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { IconCheck } from "@/components/ui/icons";
 import { addAgencyDays, formatInTimezone } from "@/lib/dates";
-import { getTranslator, resolveLocale } from "@/lib/i18n";
+import { getMessages, getTranslator, resolveLocale } from "@/lib/i18n";
 import {
   getPublicAgency,
   getPublicLocations,
@@ -117,7 +117,7 @@ export default async function HomePage({
                 returnLocation: options[0].id,
                 lang: locale,
               }}
-              labels={t}
+              messages={getMessages(locale)}
               currency={agency.currency}
             />
           )}

@@ -5,7 +5,6 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { IconSearch } from "@/components/ui/icons";
-import type { Translator } from "@/lib/i18n";
 
 export type LocationOption = { id: string; name: string; fee: string };
 
@@ -21,7 +20,7 @@ export function SearchForm({
   locations,
   allowDifferentReturn,
   defaults,
-  labels,
+  messages,
   currency,
 }: {
   action: string;
@@ -36,9 +35,13 @@ export function SearchForm({
     returnLocation: string;
     lang: string;
   };
-  labels: Translator;
+  messages: Record<string, string>;
   currency: string;
 }) {
+  // A function cannot cross the server/client boundary, so the translator is
+  // rebuilt here from the plain message map the server passed down.
+  const labels = (key: string) => messages[key] ?? key;
+
   const [sameLocation, setSameLocation] = useState(
     defaults.pickupLocation === defaults.returnLocation,
   );

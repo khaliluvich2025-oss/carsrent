@@ -15,12 +15,16 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:dev": "node scripts/dev-db.mjs",
+    "db:dev:fresh": "node scripts/dev-db.mjs --fresh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1127.0",
     "@aws-sdk/s3-request-presigner": "^3.1127.0",
     "@date-fns/tz": "^1.5.0",
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11",
     "@node-rs/argon2": "^2.2.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",

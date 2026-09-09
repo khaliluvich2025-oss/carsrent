@@ -401,7 +401,7 @@ async function main() {
     },
     {
       reference: "RNT-1009", customer: "Karim El Amrani", registration: "23456-B-6",
-      pickup: at(-14, 9), return: at(-9, 9), pickupLocation: "Agency Office",
+      pickup: at(-6, 9), return: at(-2, 9), pickupLocation: "Agency Office",
       returnLocation: "Agency Office", status: "COMPLETED" as const,
       base: "1400.00", pickupFee: "0.00", returnFee: "0.00", total: "1400.00",
       paid: "1400.00", deposit: "2000.00", createdBy: employee.id,
@@ -449,6 +449,22 @@ async function main() {
             : Number(remaining) === 0
               ? "PAID"
               : "PARTIALLY_PAID",
+        // A real booking stores the engine's itemised breakdown; the seed
+        // does the same so reservation and contract screens are not blank.
+        pricingBreakdown: [
+          {
+            kind: "BASE",
+            label: "Daily rate",
+            detail: `${rentalDays} days × ${(Number(seed.base) / rentalDays).toFixed(2)} MAD`,
+            amount: seed.base,
+          },
+          ...(Number(seed.pickupFee) > 0
+            ? [{ kind: "PICKUP_FEE", label: "Pickup location", amount: seed.pickupFee }]
+            : []),
+          ...(Number(seed.returnFee) > 0
+            ? [{ kind: "RETURN_FEE", label: "Return location", amount: seed.returnFee }]
+            : []),
+        ],
         createdById: seed.createdBy,
         confirmedAt: seed.status === "AWAITING_CONFIRMATION" ? null : seed.pickup,
         completedAt: seed.status === "COMPLETED" ? seed.return : null,

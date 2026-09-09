@@ -82,3 +82,42 @@ exclusion constraint that makes two overlapping blocks for the same vehicle
 **impossible to commit**. That constraint — not application code — is what
 guarantees no double booking under concurrency. It requires the `btree_gist`
 extension, which the initial migration creates. Do not drop either.
+
+## Running it locally without installing PostgreSQL
+
+The project ships with an embedded development database, so `npm install` and
+three commands are enough to see the whole product working.
+
+```bash
+npm run db:dev:fresh
+```
+
+That starts **real PostgreSQL** — PGlite, the Postgres engine compiled to
+WebAssembly — and exposes it on `127.0.0.1:5433`, persisted to `.pgdata/`.
+Prisma, migrations, the seed and the app all connect to it exactly as they would
+to a hosted server. Leave it running in its own terminal.
+
+Then, in a second terminal:
+
+```bash
+npm run db:deploy && npm run db:seed && npm run dev
+```
+
+Open `http://localhost:3000/atlas-cars` for the customer website, or
+`http://localhost:3000/atlas-cars/login` for the staff dashboard. The seed prints
+the demo credentials.
+
+### Limits of the development database
+
+PGlite is a single-threaded engine, which is fine for browsing and for every
+workflow in the product, but two things differ from a real server:
+
+- It cannot serve genuinely parallel transactions, so `DATABASE_POOL_MAX="1"` is
+  set in `.env` to make queries queue.
+- The two racing tests in the double-booking suite skip themselves, because a
+  race needs real parallelism to mean anything. Everything else in that suite —
+  the exclusion constraint, buffers, maintenance conflicts, expiring holds and
+  tenant isolation — runs and passes against it.
+
+Point `DATABASE_URL` and `DIRECT_URL` at a hosted PostgreSQL, drop
+`DATABASE_POOL_MAX` and `DEV_DB_CONCURRENCY_LIMITED`, and the full suite runs.

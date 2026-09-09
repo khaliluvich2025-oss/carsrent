@@ -20,6 +20,22 @@ import { VehicleUnavailableError } from "@/server/services/availability/errors";
 const url = process.env.DATABASE_URL ?? "";
 const DB_READY = url.length > 0 && !url.includes("user:password@host");
 
+/**
+ * The development database (PGlite) is real PostgreSQL compiled to WebAssembly,
+ * so it enforces the exclusion constraint exactly as a server does — but it is
+ * single-threaded and cannot serve genuinely parallel transactions. The two
+ * racing tests below therefore need a real PostgreSQL server, and skip loudly
+ * rather than failing for a reason that has nothing to do with the product.
+ */
+const PARALLEL_CAPABLE =
+  DB_READY && process.env.DEV_DB_CONCURRENCY_LIMITED !== "1";
+
+if (DB_READY && !PARALLEL_CAPABLE) {
+  console.warn(
+    "[integration] Skipping the two parallel-race tests: the development database is single-threaded. Point DATABASE_URL at a real PostgreSQL server to run them.",
+  );
+}
+
 if (!DB_READY) {
   console.warn(
     "[integration] Skipping double-booking tests — set DATABASE_URL in .env and run `npm run db:migrate` first.",
@@ -104,7 +120,7 @@ describe.skipIf(!DB_READY)("double-booking protection (spec §92)", () => {
    * THE test. Two customers, same vehicle, same dates, genuinely simultaneous.
    * Exactly one must win; there must never be two overlapping blocks.
    */
-  it("lets exactly one of two concurrent bookings succeed", async () => {
+  it.skipIf(!PARALLEL_CAPABLE)("lets exactly one of two concurrent bookings succeed", async () => {
     const results = await Promise.allSettled([reserve(), reserve()]);
 
     const fulfilled = results.filter((r) => r.status === "fulfilled");
@@ -122,7 +138,7 @@ describe.skipIf(!DB_READY)("double-booking protection (spec §92)", () => {
     expect(stored).toBe(1);
   });
 
-  it("holds under a wider stampede", async () => {
+  it.skipIf(!PARALLEL_CAPABLE)("holds under a wider stampede", async () => {
     const results = await Promise.allSettled(
       Array.from({ length: 8 }, () => reserve()),
     );

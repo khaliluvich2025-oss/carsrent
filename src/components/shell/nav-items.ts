@@ -72,13 +72,15 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "alert",
     permission: "dashboard.view",
   },
-  {
-    key: "maintenance",
-    label: "Maintenance",
-    href: "/maintenance",
-    icon: "wrench",
-    permission: "maintenance.view",
-  },
+  // Maintenance has no screen yet (Phase 12). Listed here so it is one line to
+  // restore, but kept out of the nav rather than sending staff to a 404.
+  // {
+  //   key: "maintenance",
+  //   label: "Maintenance",
+  //   href: "/maintenance",
+  //   icon: "wrench",
+  //   permission: "maintenance.view",
+  // },
   {
     key: "reports",
     label: "Reports",
