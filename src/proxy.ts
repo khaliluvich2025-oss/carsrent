@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 export const LANG_HEADER = "x-rental-lang";
+export const PATH_HEADER = "x-rental-path";
 
 /**
  * Two jobs, both about getting request context to the right place.
@@ -13,6 +14,11 @@ export const LANG_HEADER = "x-rental-lang";
  *    site's layout needs the chosen language to set `lang`/`dir` and translate
  *    its own chrome. The choice is copied from the query string into a request
  *    header, which a layout *can* read.
+ *
+ * 3. Path forwarding, for the same reason: the auth guard has to send an
+ *    unauthenticated visitor to *their agency's* sign-in page, and the only
+ *    place the slug appears is the URL. It is set after any host rewrite, so it
+ *    is always the canonical `/{slug}/...` form.
  *
  * Custom domains are resolved in the page layer, not here: the proxy runs on the
  * edge runtime where Prisma is unavailable, and a database lookup per request
@@ -27,25 +33,28 @@ export function proxy(request: NextRequest) {
   const rootDomain = process.env.APP_ROOT_DOMAIN;
   const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
 
+  const { pathname } = request.nextUrl;
+
   const shouldRewriteHost =
     rootDomain && host && host !== rootDomain && host.endsWith(`.${rootDomain}`);
 
-  if (!shouldRewriteHost) {
+  const passThrough = () => {
+    headers.set(PATH_HEADER, pathname);
     return NextResponse.next({ request: { headers } });
-  }
+  };
+
+  if (!shouldRewriteHost) return passThrough();
 
   const slug = host.slice(0, -(rootDomain.length + 1));
-  if (!slug || slug === "www" || slug.includes(".")) {
-    return NextResponse.next({ request: { headers } });
-  }
+  if (!slug || slug === "www" || slug.includes(".")) return passThrough();
 
-  const { pathname } = request.nextUrl;
   if (pathname === `/${slug}` || pathname.startsWith(`/${slug}/`)) {
-    return NextResponse.next({ request: { headers } });
+    return passThrough();
   }
 
   const url = request.nextUrl.clone();
   url.pathname = `/${slug}${pathname === "/" ? "" : pathname}`;
+  headers.set(PATH_HEADER, url.pathname);
   return NextResponse.rewrite(url, { request: { headers } });
 }
 

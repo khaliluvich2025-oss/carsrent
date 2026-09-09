@@ -3,7 +3,10 @@ import { z } from "zod";
 import { isPlausiblePhone, normalizePhone } from "@/lib/phone";
 import { optionalText, requiredText } from "@/lib/validation";
 import { hashPassword, validatePasswordStrength } from "@/server/auth/password";
-import { revokeAllSessions } from "@/server/auth/session";
+import {
+  revokeAllSessions,
+  revokeOtherSessions,
+} from "@/server/auth/session";
 import { db } from "@/server/db";
 import type { TenantDb } from "@/server/tenant";
 
@@ -321,10 +324,18 @@ export async function setEmployeeActive(
   return updated;
 }
 
+/**
+ * Set a new password for a team member.
+ *
+ * `keepSessionId` is passed when someone resets their *own* password: the other
+ * devices are signed out, but the browser doing the reset stays in. Resetting
+ * someone else's password revokes everything, as it must.
+ */
 export async function resetEmployeePassword(
   tdb: TenantDb,
   userId: string,
   password: string,
+  keepSessionId?: string,
 ) {
   const weak = validatePasswordStrength(password);
   if (weak) throw new TeamError("password", weak);
@@ -340,7 +351,11 @@ export async function resetEmployeePassword(
   });
 
   // Everywhere they were signed in is now stale.
-  await revokeAllSessions(userId);
+  if (keepSessionId) {
+    await revokeOtherSessions(userId, keepSessionId);
+  } else {
+    await revokeAllSessions(userId);
+  }
 }
 
 /** Recent activity for one employee (spec §79). */

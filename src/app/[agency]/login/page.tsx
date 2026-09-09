@@ -10,10 +10,14 @@ export const metadata: Metadata = { title: "Sign in" };
 
 export default async function LoginPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ agency: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { agency: slug } = await params;
+  const [{ agency: slug }, query] = await Promise.all([params, searchParams]);
+  const rawNext = query.next;
+  const next = (Array.isArray(rawNext) ? rawNext[0] : rawNext) ?? "";
 
   const agency = await db.agency.findUnique({
     where: { slug },
@@ -72,7 +76,7 @@ export default async function LoginPage({
         </div>
 
         <div className="rounded-card border border-line bg-surface p-6 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-          <LoginForm action={login.bind(null, slug)} />
+          <LoginForm action={login.bind(null, slug, next)} />
         </div>
 
         <p className="mt-5 text-center text-xs text-ink-muted">

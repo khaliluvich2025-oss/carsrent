@@ -7,6 +7,7 @@ import { z } from "zod";
 import { db } from "@/server/db";
 import { createSession } from "@/server/auth/session";
 import { verifyPassword } from "@/server/auth/password";
+import { landingPath } from "@/server/auth/redirects";
 
 const MAX_FAILED_ATTEMPTS = 8;
 const LOCKOUT_MINUTES = 15;
@@ -24,6 +25,7 @@ export type LoginState = { error?: string };
  */
 export async function login(
   agencySlug: string,
+  next: string,
   _prev: LoginState,
   formData: FormData,
 ): Promise<LoginState> {
@@ -114,5 +116,5 @@ export async function login(
     },
   });
 
-  redirect(`/${agencySlug}/dashboard`);
+  redirect(landingPath(agencySlug, next));
 }

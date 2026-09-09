@@ -143,6 +143,22 @@ export async function revokeAllSessions(userId: string): Promise<void> {
   await db.session.deleteMany({ where: { userId } });
 }
 
+/**
+ * Revoke a user's sessions except the one making the request.
+ *
+ * Changing your own password should sign out the other devices, not the browser
+ * you are typing into: an owner who resets their own password and is thrown
+ * back to a sign-in page has no way of knowing whether the change even took.
+ */
+export async function revokeOtherSessions(
+  userId: string,
+  keepSessionId: string,
+): Promise<void> {
+  await db.session.deleteMany({
+    where: { userId, id: { not: keepSessionId } },
+  });
+}
+
 /** Constant-time comparison for any token check outside the session path. */
 export function safeEquals(a: string, b: string): boolean {
   const bufA = Buffer.from(a);

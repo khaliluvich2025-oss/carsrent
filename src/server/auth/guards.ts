@@ -1,7 +1,10 @@
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { PATH_HEADER } from "@/proxy";
 import { getTenantDb, type TenantDb } from "@/server/tenant";
 import { can, type Permission } from "./permissions";
+import { signInPath } from "./redirects";
 import { getSession, type SessionUser } from "./session";
 
 /**
@@ -38,10 +41,18 @@ export async function getAuthContext(): Promise<AuthContext | null> {
   return user ? contextFor(user) : null;
 }
 
-/** Page/server-action guard: redirects anonymous visitors to the login page. */
+/**
+ * Page/server-action guard: redirects anonymous visitors to the login page.
+ *
+ * Which login page depends on the agency they were trying to reach, and the
+ * only place that appears is the URL — which `src/proxy.ts` forwards in a
+ * header because a server component cannot read it otherwise.
+ */
 export async function requireUser(): Promise<AuthContext> {
   const user = await getSession();
-  if (!user) redirect("/login");
+  if (!user) {
+    redirect(signInPath((await headers()).get(PATH_HEADER) ?? ""));
+  }
   return contextFor(user);
 }
 

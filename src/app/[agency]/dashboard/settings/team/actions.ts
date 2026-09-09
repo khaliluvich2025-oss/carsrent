@@ -110,8 +110,16 @@ export async function resetPasswordAction(
   });
   if (!target) return { message: "User not found." };
 
+  // Resetting your own password signs out your other devices but not this one.
+  const isSelf = userId === ctx.user.userId;
+
   try {
-    await resetEmployeePassword(ctx.db, userId, password);
+    await resetEmployeePassword(
+      ctx.db,
+      userId,
+      password,
+      isSelf ? ctx.user.sessionId : undefined,
+    );
   } catch (error) {
     if (error instanceof TeamError) {
       return { errors: { [error.field]: error.message } };
@@ -130,5 +138,10 @@ export async function resetPasswordAction(
   });
 
   revalidate(slug);
-  return { saved: true, message: `Password reset for ${target.username}.` };
+  return {
+    saved: true,
+    message: isSelf
+      ? "Your password is changed. Your other devices have been signed out."
+      : `Password reset for ${target.username}.`,
+  };
 }

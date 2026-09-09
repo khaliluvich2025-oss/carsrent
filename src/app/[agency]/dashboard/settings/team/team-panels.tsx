@@ -141,13 +141,19 @@ export function TeamList({
                 className="mt-3 space-y-3 rounded-lg bg-surface-sunken p-3"
               >
                 <input type="hidden" name="userId" value={member.id} />
-                <FormError>{resetState.message}</FormError>
+                <FormError>
+                  {resetState.saved ? undefined : resetState.message}
+                </FormError>
                 <Field
                   label="New password"
                   htmlFor={`pw-${member.id}`}
                   required
                   error={resetState.errors?.password}
-                  hint="Signs them out everywhere. Tell them the new password directly."
+                  hint={
+                    member.isSelf
+                      ? "Signs out your other devices. You stay signed in here."
+                      : "Signs them out everywhere. Tell them the new password directly."
+                  }
                 >
                   <Input
                     id={`pw-${member.id}`}
