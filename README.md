@@ -8,6 +8,8 @@ a dashboard for the agency Owner and Employees.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture, security model,
   decisions and assumptions
 - [`docs/CHECKLIST.md`](docs/CHECKLIST.md) — phase-by-phase implementation progress
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — deploying to Vercel: database,
+  object storage and environment variables
 
 ## Stack
 
