@@ -96,6 +96,12 @@ never generates one and never resets anything. If the database is unreachable
 or a migration fails, the build fails and the previous deployment stays live,
 which is the behaviour you want.
 
+Nothing in the build reads `.env`; it is gitignored and Vercel never sees one.
+`prisma.config.ts` tolerates its absence deliberately, because the whole build
+runs on the dashboard's variables instead. The same sequence — migrate, lint,
+typecheck, test, build — runs in CI on every pull request against a real
+PostgreSQL container, so a deploy that would have failed here fails there first.
+
 ## After the first deploy
 
 The database is empty: no agency exists, so every URL 404s. Seed it against the

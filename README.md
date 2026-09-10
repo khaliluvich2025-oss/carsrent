@@ -77,6 +77,18 @@ same pages (`src/proxy.ts`).
 | `npm run db:seed`   | Seed a demo agency                             |
 | `npm run db:studio` | Prisma Studio                                  |
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request:
+lint, typecheck, the full test suite, then the production build — the same
+sequence Vercel would fail on, but before the deploy rather than during it.
+
+It brings up a **real PostgreSQL 16 service container** rather than the embedded
+development database. That matters for one suite in particular: the
+double-booking tests race transactions against the GiST exclusion constraint,
+and a race needs genuine parallelism to prove anything, so against PGlite the
+two racing tests skip themselves. In CI they run.
+
 ## A note on the database
 
 `vehicle_blocks` is the single source of vehicle occupancy, and it carries a GiST
@@ -117,9 +129,15 @@ workflow in the product, but two things differ from a real server:
 - It cannot serve genuinely parallel transactions, so `DATABASE_POOL_MAX="1"` is
   set in `.env` to make queries queue.
 - The two racing tests in the double-booking suite skip themselves, because a
-  race needs real parallelism to mean anything. Everything else in that suite —
-  the exclusion constraint, buffers, maintenance conflicts, expiring holds and
-  tenant isolation — runs and passes against it.
+  race needs real parallelism to mean anything.
+- It serves **one connection at a time**, and the app wants two: route handlers
+  and pages are separate bundles, so each holds its own Prisma pool. Whichever
+  connection is displaced fails with `Connection terminated unexpectedly`. In
+  practice that means the CSV export route 500s once a dashboard page has
+  rendered, and the integration suite fails a different test on most runs. Both
+  disappear against a real server — neither is a fault in the app.
 
 Point `DATABASE_URL` and `DIRECT_URL` at a hosted PostgreSQL, drop
-`DATABASE_POOL_MAX` and `DEV_DB_CONCURRENCY_LIMITED`, and the full suite runs.
+`DATABASE_POOL_MAX` and `DEV_DB_CONCURRENCY_LIMITED`, and the full suite runs:
+325 tests, nothing skipped. Anything that has to be *trusted* — the booking
+guarantee above all — should be judged there or in CI, not here.
