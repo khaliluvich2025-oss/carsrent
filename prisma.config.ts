@@ -1,8 +1,11 @@
+import { existsSync } from "node:fs";
 import { defineConfig } from "prisma/config";
 
 // The Prisma CLI does not load .env implicitly in v7. Node 24 can do it natively,
 // so no dotenv dependency is needed. Next.js loads .env for the app itself.
-process.loadEnvFile?.(".env");
+if (existsSync(".env")) {
+  process.loadEnvFile?.(".env");
+}
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
