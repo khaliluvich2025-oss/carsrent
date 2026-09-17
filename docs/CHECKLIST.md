@@ -26,8 +26,9 @@ Tick items as they land.
       money, date/overlap/buffer (80 tests)
 - [x] Availability block writer + `23P01` → `VehicleUnavailableError` mapping
 - [x] Integration suite for spec §92 (skips until a real `DATABASE_URL` is set)
-- [ ] **Run the migration and seed against a real database** — needs `DATABASE_URL`
-- [ ] **Prove the exclusion constraint under real concurrency** — `npm run test:integration`
+- [x] **Run the migration and seed against a real database** — PostgreSQL 16
+- [x] **Prove the exclusion constraint under real concurrency** — 13/13 green on a
+      real server, the two racing tests included
 
 ## Phase 1b — Application shell
 
@@ -77,7 +78,8 @@ Tick items as they land.
 - [x] Fleet calendar (day / week / month), click-to-inspect
 - [x] Tests: overlap matrix, buffer edges, calendar placement/clipping,
       agency-local week/month windows
-- [ ] Concurrent booking + §92 scenario — **needs a real database**
+- [x] Concurrent booking + §92 scenario — two simultaneous bookings, and an
+      eight-way stampede, leave exactly one block behind
 
 ## Phase 5 — Client website
 
