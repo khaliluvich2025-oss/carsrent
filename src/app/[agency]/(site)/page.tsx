@@ -96,8 +96,11 @@ export default async function HomePage({
         </div>
       </section>
 
-      {/* Search — pulled up over the hero edge */}
-      <section className="mx-auto -mt-8 max-w-3xl px-4 sm:px-6">
+      {/* Search — pulled up over the hero edge.
+          `relative z-10` is what puts it *over* rather than under: the hero above
+          is positioned, so without a position of its own this card loses the
+          paint order and the hero clips its top row. */}
+      <section className="relative z-10 mx-auto -mt-8 max-w-3xl px-4 sm:px-6">
         <Card className="shadow-lg">
           {locations.length === 0 ? (
             <p className="py-4 text-center text-sm text-ink-muted">
