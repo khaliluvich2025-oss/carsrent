@@ -80,7 +80,7 @@ same pages (`src/proxy.ts`).
 | `npm run dev`       | Development server                            |
 | `npm run build`     | Generate the Prisma client, then build         |
 | `npm test`          | Vitest — business-logic and isolation tests    |
-| `npm run typecheck` | `tsc --noEmit`                                 |
+| `npm run typecheck` | Generate route types, then `tsc --noEmit`      |
 | `npm run lint`      | ESLint                                         |
 | `npm run db:migrate`| Create/apply migrations (dev)                  |
 | `npm run db:deploy` | Apply migrations (production)                  |
